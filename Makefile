@@ -11,8 +11,6 @@ DEPS    = $(OBJS:.o=.d)
 
 TARGET  = mdb.out
 
--include $(DEPS)
-
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
@@ -40,3 +38,5 @@ clean:
 	@rm -rf $(BUILD)
 
 .PHONY: all debug tests clean
+
+-include $(DEPS)
