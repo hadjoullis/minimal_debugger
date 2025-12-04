@@ -1,57 +1,97 @@
 #include <commands.h>
+#include <readline/history.h>
+#include <readline/readline.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <util.h>
 
-void command_prompt(char **argv, function_t *functions);
+void command_prompt(char *target, fn_t *fns);
 
 int main(int argc, char **argv) {
     if (argc != 2) {
-        fprintf(stderr, "Usage: ./a.out <filename>\n");
+        fprintf(stderr, "Usage: ./mdb.out <filename>\n");
         return EXIT_FAILURE;
     }
+    char *target = argv[1];
 
-    function_t *functions = NULL;
-    load_ELF(argv[1], &functions);
-    command_prompt(argv + 1, functions);
+    fn_t *fns = NULL;
+    load_ELF(target, &fns);
+    command_prompt(target, fns);
 
     return EXIT_SUCCESS;
 }
 
-void handle_input(char **argv, pid_t *pid, char *buffer, void **function) {
-    static char previous_buffer[BUF_LEN] = "r";
+/* Read a string, and return a pointer to it.
+   Returns NULL on EOF. */
+char *rl_gets() {
+    static char *line_read = NULL;
+    static char prev_read[MAX_CMD_LEN] = "";
+    if (line_read) {
+        free(line_read);
+        line_read = NULL;
+    }
 
+    char *prompt = "(mdb) ";
+    line_read = readline(prompt);
+
+    // EOF
+    if (!line_read) {
+        return "quit";
+    }
+
+    // non-empty input -> add to history
+    if (*line_read) {
+        if (strlen(line_read) >= MAX_CMD_LEN) {
+            fprintf(stderr, "ERROR: exceeded maximum command length(%d)\n",
+                    MAX_CMD_LEN);
+            return "";
+        }
+        strcpy(prev_read, line_read);
+        add_history(line_read);
+        return line_read;
+    }
+
+    // empty input -> reuse prev input
+    return prev_read;
+}
+
+/* Generate argc and argv that represend user input while not exceeding
+ * MAX_CMD_ARG. Memory of input is reused for tokens since the buffer will not
+ * be freed until command is over executing. */
+int tokenize_input(char *input, int *argc, char **argv) {
+    const char *delim = " \t";
+    char *token = strtok(input, delim);
+    if (token == NULL) {
+        *argc = 0;
+        return EXIT_SUCCESS;
+    }
+    *argc = 1;
+    argv[0] = token;
+    while ((token = strtok(NULL, delim))) {
+        if (*argc == MAX_CMD_ARGC) {
+            fprintf(stderr, "ERROR: exceeded maximum command argc(%d)\n",
+                    MAX_CMD_ARGC);
+            return EXIT_FAILURE;
+        }
+        argv[*argc] = token;
+        (*argc)++;
+    }
+    return EXIT_SUCCESS;
+}
+
+void get_cmd(cmd_t *cmd, cmd_args_t *cmd_args) {
     while (1) {
-        printf("(mdb) ");
-        if (fgets(buffer, BUF_LEN, stdin) == NULL) {
-            die("(input) %s", strerror(errno));
-        }
-        // repeat previous command for empty input
-        (buffer[0] == '\n') ? (strcpy(buffer, previous_buffer))
-                            : (strcpy(previous_buffer, buffer));
-
-        buffer[strlen(buffer) - 1] = '\0'; // remove newline
-        size_t word_len = strcspn(buffer, " ");
-        if (strncmp("r", buffer, word_len) == 0 ||
-            strncmp("run", buffer, word_len) == 0) {
-            *pid = run(*pid, argv);
+        char *input = rl_gets();
+        cmd_args->argc = 0;
+        int ret = tokenize_input(input, &(cmd_args->argc), cmd_args->argv);
+        if (ret == EXIT_FAILURE || cmd_args->argc == 0) {
             continue;
         }
 
-        if (strncmp("c", buffer, word_len) == 0 ||
-            strncmp("cont", buffer, word_len) == 0) {
-            *pid = cont(*pid);
-            continue;
-        }
-
-        if (strncmp("si", buffer, word_len) == 0) {
-            *pid = single_instruction(*pid);
-            continue;
-        }
-
-        int i;
-        for (i = 0; commands[i].function != NULL; i++) {
-            // compare until first space
-            if (strncmp(commands[i].command, buffer, word_len) == 0) {
-                *function = commands[i].function;
+        for (int i = 0; cmd_names[i].name != NULL; i++) {
+            if (strcmp(cmd_names[i].name, cmd_args->argv[0]) == 0) {
+                *cmd = cmd_names[i].cmd;
                 return;
             }
         }
@@ -59,13 +99,12 @@ void handle_input(char **argv, pid_t *pid, char *buffer, void **function) {
     }
 }
 
-void command_prompt(char **argv, function_t *functions) {
-    char buffer[BUF_LEN] = "";
-    void (*function)(int, char *, function_t *) = NULL;
-    pid_t pid = 0;
+void command_prompt(char *target, fn_t *fns) {
+    cmd_t cmd = NULL;
+    cmd_args_t cmd_args = { .target = target, .fns = fns, .pid = 0};
 
     while (1) {
-        handle_input(argv, &pid, buffer, (void **)&function);
-        function(pid, buffer, functions);
+        get_cmd(&cmd, &cmd_args);
+        cmd(&cmd_args);
     }
 }

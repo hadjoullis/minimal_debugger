@@ -35,10 +35,10 @@
 typedef struct {
     Elf64_Addr addr;
     char *func_name;
-} function_t;
+} fn_t;
 
-void load_ELF(char *filename, function_t **functions);
-void check_symtab(Elf *elf, function_t **functions);
+void load_ELF(char *filename, fn_t **fns);
+void check_symtab(Elf *elf, fn_t **fns);
 Elf_Scn *get_elf_section(Elf *elf, char *section);
 
 #endif
