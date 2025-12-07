@@ -15,7 +15,7 @@
 
 typedef struct {
     Elf64_Addr addr[MAX_BREAKPOINTS];
-    long bytes[MAX_BREAKPOINTS];
+    long byte[MAX_BREAKPOINTS];
     bool active[MAX_BREAKPOINTS];
     int len;
 } breakpoint_t;
