@@ -23,7 +23,7 @@
 #include <syscall.h>
 
 #define BUF_LEN 256
-#define TOOL "min_gdb"
+#define TOOL "mdb"
 
 #define die(...)                                                               \
     do {                                                                       \
@@ -33,10 +33,10 @@
     } while (0)
 
 typedef struct {
-    Elf64_Addr addr;
-    char *func_name;
-} fn_t;
+    Elf64_Addr *addr;
+    char **name;
+} fns_t;
 
-void load_ELF(char *filename, fn_t **fns);
+void load_ELF(char *filename, fns_t *fns, bool *pie);
 
 #endif

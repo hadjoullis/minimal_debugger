@@ -22,10 +22,10 @@ cmd_entry_t cmd_registry[] = {CMD_ENTRIES{NULL, NULL, NULL, NULL}};
 
 static breakpoint_t breakpoints = {.len = 0};
 
-static Elf64_Addr symbol_addr(fn_t *fns, char *symbol) {
-    for (int i = 0; fns[i].func_name != NULL; i++) {
-        if (strcmp(fns[i].func_name, symbol) == 0) {
-            return fns[i].addr;
+static Elf64_Addr symbol_addr(fns_t *fns, char *symbol) {
+    for (int i = 0; fns->name[i] != NULL; i++) {
+        if (strcmp(fns->name[i], symbol) == 0) {
+            return fns->addr[i];
         }
     }
     return 0;
@@ -79,20 +79,59 @@ static void new_breakpoint(Elf64_Addr addr, long byte) {
     fprintf(stderr, "Breakpoint %d at 0x%lx\n", breakpoints.len - 1, addr);
 }
 
+static Elf64_Addr tracee_base_addr(pid_t pid, char *target) {
+    /* We need to compare names becuase there will be multiple occurances of
+     * permissions "r-xp", that will not belong to the target binary. Target is
+     * in relative path, and /proc/pid/maps is in absolute path so we should
+     * just compare basenames.
+     */
+    char *basename = strrchr(target, '/');
+    basename == NULL ? basename = target : basename++;
+    char filename[BUF_LEN] = "";
+    snprintf(filename, sizeof(filename), "/proc/%d/maps", pid);
+    FILE *maps = fopen(filename, "r");
+    if (maps == NULL) {
+        die("(tracee_base_addr: fopen) %s", strerror(errno));
+    }
+
+    Elf64_Addr base_addr = (Elf64_Addr)0;
+    char buffer[BUF_LEN * 2] = "";
+    while (fgets(buffer, sizeof(buffer), maps) != NULL) {
+        if (!strstr(buffer, "r-xp") || !strstr(target, basename)) {
+            continue;
+        }
+        unsigned long start_addr, offset;
+        sscanf(buffer, "%lx-%*x %*4c %lx", &start_addr, &offset);
+        base_addr = (Elf64_Addr)(start_addr - offset);
+#ifdef DEBUG
+        fprintf(stderr, "INFO: '%s' .text: 0x%lx\n", target, start_addr);
+        fprintf(stderr, "INFO: '%s' offset: 0x%lx\n", target, offset);
+#endif
+        break;
+    }
+    fclose(maps);
+    if (base_addr == (Elf64_Addr)0) {
+        die("(tracee_base_addr) %s", "unable to find .text section");
+    }
+    return base_addr;
+}
+
 void breakpoint(cmd_args_t *cmd_args) {
     if (cmd_args->argc != 2) {
         fprintf(stderr, "provide a single breakpoint\n");
         return;
     }
     // convert possible symbol into address
-
-    Elf64_Addr addr = 0;
-    bool is_addr = cmd_args->argv[1][0] == '*';
-    addr = (is_addr ? (Elf64_Addr)strtol(cmd_args->argv[1] + 1, NULL, 16)
-                    : symbol_addr(cmd_args->fns, cmd_args->argv[1]));
-    if (addr == 0) {
-        fprintf(stderr, "symbol not found\n");
-        return;
+    Elf64_Addr addr;
+    if (cmd_args->argv[1][0] == '*') {
+        addr = (Elf64_Addr)strtol(cmd_args->argv[1] + 1, NULL, 16);
+    } else {
+        addr = symbol_addr(cmd_args->fns, cmd_args->argv[1]);
+        if (addr == 0) {
+            fprintf(stderr, "symbol not found\n");
+            return;
+        }
+        addr += cmd_args->base_addr;
     }
 
     if (cmd_args->pid == 0) {
@@ -145,8 +184,7 @@ void delete_break(cmd_args_t *cmd_args) {
         }
         bytes = (bytes & (~0xFF)) | byte;
 
-        if (ptrace(PTRACE_POKEDATA, cmd_args->pid,
-                   (void *)addr,
+        if (ptrace(PTRACE_POKEDATA, cmd_args->pid, (void *)addr,
                    (void *)bytes) == -1) {
             die("(delete_break: pokedata) %s", strerror(errno));
         }
@@ -292,10 +330,16 @@ void disas_wrapper(cmd_args_t *cmd_args) {
     disas(cmd_args->pid, addr);
 }
 
-static void unset_breakpoints() {
+static void unset_breakpoints(void) {
     for (int i = 0; i < breakpoints.len; i++) {
         breakpoints.byte[i] = -1;
         breakpoints.active[i] = false;
+    }
+}
+
+static void fix_cur_breakpoints(Elf64_Addr base) {
+    for (int i = 0; i < breakpoints.len; i++) {
+        breakpoints.addr[i] += base;
     }
 }
 
@@ -366,6 +410,10 @@ void run(cmd_args_t *cmd_args) {
     case 0:
         // child
         ptrace(PTRACE_TRACEME, 0, 0, 0);
+        // disable ASLR to handle breakpoints
+        if (personality(ADDR_NO_RANDOMIZE) == -1) {
+            die("(run: personality) %s", strerror(errno));
+        }
         execvp(argv[0], argv);
         die("(run: execvp) %s", strerror(errno));
     }
@@ -376,6 +424,14 @@ void run(cmd_args_t *cmd_args) {
     ptrace(PTRACE_SETOPTIONS, cmd_args->pid, 0, PTRACE_O_EXITKILL);
     waitpid(cmd_args->pid, NULL, 0);
 
+    // since ASLR is disabled there is no need to read /proc/pid/maps again
+    static bool once = true;
+    if (once && cmd_args->pie) {
+        once = false;
+        Elf64_Addr base = tracee_base_addr(cmd_args->pid, cmd_args->target);
+        fix_cur_breakpoints(base);
+        cmd_args->base_addr = base;
+    }
     load_breakpoints(cmd_args->pid);
 
     if (ptrace(PTRACE_CONT, cmd_args->pid, 0, 0) == -1) {

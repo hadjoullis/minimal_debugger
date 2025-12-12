@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-void command_prompt(char *target, fn_t *fns);
+void command_prompt(char *target, bool pie, fns_t *fns);
 
 int main(int argc, char **argv) {
     if (argc != 2) {
@@ -15,9 +15,10 @@ int main(int argc, char **argv) {
     }
     char *target = argv[1];
 
-    fn_t *fns = NULL;
-    load_ELF(target, &fns);
-    command_prompt(target, fns);
+    fns_t fns = {0};
+    bool pie = false;
+    load_ELF(target, &fns, &pie);
+    command_prompt(target, pie, &fns);
 
     return EXIT_SUCCESS;
 }
@@ -104,9 +105,10 @@ void get_cmd(cmd_t *cmd, cmd_args_t *cmd_args) {
     }
 }
 
-void command_prompt(char *target, fn_t *fns) {
+void command_prompt(char *target, bool pie, fns_t *fns) {
     cmd_t cmd = NULL;
-    cmd_args_t cmd_args = {.target = target, .fns = fns, .pid = 0};
+    cmd_args_t cmd_args = {
+        .target = target, .fns = fns, .pid = 0, .pie = pie, .base_addr = 0};
 
     for (;;) {
         get_cmd(&cmd, &cmd_args);

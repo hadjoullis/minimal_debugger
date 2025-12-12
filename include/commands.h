@@ -4,6 +4,8 @@
 #include <elf_reader.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/personality.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 
 #define MAX_BREAKPOINTS 256
@@ -24,8 +26,10 @@ typedef struct {
     char *target;
     int argc;
     char *argv[MAX_CMD_ARGC];
-    fn_t *fns;
+    fns_t *fns;
     pid_t pid;
+    bool pie;
+    Elf64_Addr base_addr;
 } cmd_args_t;
 
 typedef void (*cmd_t)(cmd_args_t *cmd_args);
