@@ -1,6 +1,6 @@
 # minimal_debugger
 - minimal db implementation that supports simple breakpoints, and single step
-- can handle both PIE and non-PIE executables
+- can handle both PIE and non-PIE ELF executables
 - cannot place breakpoint in functions of shared objects that are linked with
 target at runtime
 
@@ -13,7 +13,7 @@ Install dependencies:
 Run:
 ```
 make
-make debug    # build with debug info and extra loggin to assiting in debugging
+make debug    # build with debug info and extra loggin to assist in debugging
 make tests    # compilte test files in tests dir
 ```
 
