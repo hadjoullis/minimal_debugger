@@ -24,7 +24,7 @@ int main(int argc, char **argv) {
 }
 
 /* Read a string, and return a pointer to it.
-   Returns NULL on EOF. */
+   Returns "quit" on EOF. */
 char *rl_gets() {
     static char *line_read = NULL;
     static char prev_read[MAX_CMD_LEN] = "";
